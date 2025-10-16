@@ -1,13 +1,18 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Route } from "./+types/home";
 import { useLoaderData } from 'react-router';
-import IdeaFlowCanvas, { type IdeaNode, type AssociationNode as AssociationNodeType } from '../components/IdeaFlowCanvas';
+import IdeaFlowCanvas, { type IdeaNode } from '../components/IdeaFlowCanvas';
 import ChatPrompt from '../components/ChatPrompt';
-import CreateAssociationModal from '../components/CreateAssociationModal';
 import GlobalActionsMenu from '../components/GlobalActionsMenu';
 import ConfirmModal from '../components/ConfirmModal';
-import { type Edge, MarkerType, type Node } from '@xyflow/react';
-import { getAllNodes, getAllEdges, getAllAssociations } from '../db/utils.server';
+import ToastContainer from '../components/ToastContainer';
+import { type Edge, MarkerType, type Node, type Connection } from '@xyflow/react';
+import { getAllNodes } from '../db/utils.server';
+import { useToast } from '../hooks/useToast';
+import { useNodeConnect } from '../hooks/useNodeConnect';
+import { useClearAll } from '../hooks/useClearAll';
+import { useNodeDelete } from '../hooks/useNodeDelete';
+import { useIdeaChat } from '../hooks/useIdeaChat';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -18,86 +23,109 @@ export function meta({}: Route.MetaArgs) {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const dbNodes = await getAllNodes();
-  const dbEdges = await getAllEdges();
-  const dbAssociations = await getAllAssociations();
 
-  // Transform database nodes to React Flow nodes
-  const ideaNodes: IdeaNode[] = dbNodes.map(node => ({
-    id: node.id,
-    type: 'idea',
-    position: { x: node.positionX, y: node.positionY },
-    data: {
-      title: node.title,
-      body: node.body,
-      nextNodes: node.nextNodes ? JSON.parse(node.nextNodes) : [],
-      prevNodes: node.prevNodes ? JSON.parse(node.prevNodes) : [],
-      timestamp: node.timestamp
+  // Helper function to estimate node height based on content
+  const estimateNodeHeight = (title: string, body: string): number => {
+    const baseHeight = 60; // Base padding, borders, handles, etc.
+    const maxWidth = 250; // max-w-[250px] from IdeaNode
+    const avgCharWidth = 7; // Approximate character width in pixels
+
+    // Calculate title height (font-semibold text-sm)
+    const titleCharsPerLine = Math.floor(maxWidth / avgCharWidth);
+    const titleLines = Math.ceil(title.length / titleCharsPerLine);
+    const titleHeight = titleLines * 20; // 20px line height
+
+    // Calculate body height (text-xs)
+    const bodyCharsPerLine = Math.floor(maxWidth / (avgCharWidth * 0.85)); // Smaller font
+    const bodyLines = Math.ceil(body.length / bodyCharsPerLine);
+    const bodyHeight = bodyLines * 18; // 18px line height
+
+    return baseHeight + titleHeight + bodyHeight;
+  };
+
+  // Calculate positions for nodes in linear order
+  const nodePositions = new Map<string, { x: number; y: number }>();
+
+  // Find the head node (no prevNode)
+  const headNode = dbNodes.find(n => !n.prevNode);
+
+  console.log('[LOADER] Node chain analysis:', {
+    totalNodes: dbNodes.length,
+    headNode: headNode ? { id: headNode.id, title: headNode.title } : null,
+    allNodesPrevNext: dbNodes.map(n => ({ id: n.id, prevNode: n.prevNode, nextNode: n.nextNode }))
+  });
+
+  if (headNode) {
+    // Start position
+    let currentY = 100;
+    const centerX = 400;
+
+    // Walk the chain from head to tail
+    let currentNode: typeof headNode | null = headNode;
+    let chainLength = 0;
+    while (currentNode) {
+      nodePositions.set(currentNode.id, { x: centerX, y: currentY });
+      console.log(`[LOADER] Positioned node ${currentNode.id} at (${centerX}, ${currentY})`);
+      chainLength++;
+
+      // Calculate height of current node for spacing
+      const nodeHeight = estimateNodeHeight(currentNode.title, currentNode.body);
+      currentY += nodeHeight + 50; // 50px spacing between nodes
+
+      // Move to next node in chain
+      if (currentNode.nextNode) {
+        const nextNodeId: string = currentNode.nextNode;
+        currentNode = dbNodes.find(n => n.id === nextNodeId) ?? null;
+      } else {
+        break;
+      }
     }
-  }));
+    console.log(`[LOADER] Positioned ${chainLength} nodes in chain`);
+  }
 
-  // Transform associations to React Flow nodes
-  const associationNodes: AssociationNodeType[] = dbAssociations.map(assoc => {
-    // Calculate position based on parent node position, vector, and distance
-    const parentNode = dbNodes.find(n => n.id === assoc.parentNodeId);
-    const parentX = parentNode?.positionX || 0;
-    const parentY = parentNode?.positionY || 0;
-    const angleRad = (assoc.vectorDirection * Math.PI) / 180;
-    const positionX = parentX + Math.cos(angleRad) * assoc.distance;
-    const positionY = parentY + Math.sin(angleRad) * assoc.distance;
-
+  // Transform database nodes to React Flow nodes with calculated positions
+  const ideaNodes: IdeaNode[] = dbNodes.map(node => {
+    const position = nodePositions.get(node.id) || { x: 400, y: 100 };
+    console.log(`[LOADER] Node ${node.id} final position:`, position, `(was in map: ${nodePositions.has(node.id)})`);
     return {
-      id: assoc.id,
-      type: 'association',
-      position: { x: positionX, y: positionY },
-      draggable: false, // Associations can't be dragged independently
+      id: node.id,
+      type: 'idea',
+      position,
       data: {
-        description: assoc.description,
-        prevNodeData: assoc.prevNodeData ? JSON.parse(assoc.prevNodeData) : null,
-        nextNodeData: assoc.nextNodeData ? JSON.parse(assoc.nextNodeData) : null,
-        parentNodeId: assoc.parentNodeId,
-        vectorDirection: assoc.vectorDirection,
-        distance: assoc.distance
+        title: node.title,
+        body: node.body,
+        nextNode: node.nextNode || null,
+        prevNode: node.prevNode || null,
+        timestamp: node.timestamp
       }
     };
   });
 
-  const allNodes = [...ideaNodes, ...associationNodes];
+  // Create edges based on nextNode relationships in nodes
+  const edges = dbNodes
+    .filter(node => node.nextNode)
+    .map(node => ({
+      id: `${node.id}-${node.nextNode}`,
+      source: node.id,
+      target: node.nextNode!,
+      type: 'default' as const,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 20,
+        height: 20,
+      },
+      label: 'next',
+      style: { stroke: '#10b981', strokeWidth: 2 }
+    })) as Edge[];
 
-  // Transform database edges to React Flow edges
-  const edges: Edge[] = dbEdges.map(edge => {
-    const baseEdge = {
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: edge.type === 'association' ? 'straight' : 'default',
-      label: edge.label || undefined,
-      style: { stroke: edge.type === 'association' ? '#9333ea' : '#10b981', strokeWidth: 2 }
-    };
-
-    // Only add arrow marker for non-association edges
-    if (edge.type !== 'association') {
-      return {
-        ...baseEdge,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 20,
-          height: 20,
-        },
-      };
-    }
-
-    return baseEdge;
-  });
-
-  return { nodes: allNodes, edges };
+  return { nodes: ideaNodes, edges };
 }
 
 export default function Home() {
   const { nodes: initialNodes, edges: initialEdges } = useLoaderData<typeof loader>();
   const [nodes, setNodes] = useState<Node[]>(initialNodes);
-  const [edges, setEdges] = useState<Edge[]>(initialEdges);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedNodeForAssociation, setSelectedNodeForAssociation] = useState<{ id: string; position: { x: number; y: number } } | null>(null);
+  const [edges, setEdges] = useState<Edge<any>[]>(initialEdges as Edge<any>[]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -111,9 +139,22 @@ export default function Home() {
     onConfirm: () => {},
   });
 
-  const handleCreateAssociation = useCallback((nodeId: string, position: { x: number; y: number }) => {
-    setSelectedNodeForAssociation({ id: nodeId, position });
-    setIsModalOpen(true);
+  // Custom hooks
+  const { toasts, addToast, dismissToast } = useToast();
+  const { handleConnect } = useNodeConnect({ nodes, addToast });
+  const { executeClearAll } = useClearAll({ addToast });
+  const { handleDeleteNode: deleteNode } = useNodeDelete({ addToast });
+  const { chatFetcher } = useIdeaChat({ addToast });
+
+  // Update local state when loader data changes (after revalidation)
+  useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges as Edge<any>[]);
+  }, [initialNodes, initialEdges]);
+
+  const handleNodeSelect = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setOpenMenuNodeId(null); // Close any open menus
   }, []);
 
   const handleDeleteNode = useCallback((nodeId: string) => {
@@ -121,148 +162,28 @@ export default function Home() {
       isOpen: true,
       title: 'Delete Node',
       message: 'Are you sure you want to delete this node? This will also delete all associated connections.',
-      onConfirm: async () => {
-        try {
-          const response = await fetch('/api/nodes/delete', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({ nodeId })
-          });
-
-          if (response.ok) {
-            // Remove the node and its associated edges from state
-            setNodes(prev => prev.filter(n => n.id !== nodeId));
-            setEdges(prev => prev.filter(e => e.source !== nodeId && e.target !== nodeId));
-          }
-        } catch (error) {
-          console.error('Error deleting node:', error);
-        }
+      onConfirm: () => {
+        deleteNode(nodeId);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
-  }, []);
+  }, [deleteNode]);
 
   const handleClearAll = useCallback(() => {
     setConfirmModal({
       isOpen: true,
       title: 'Clear All Nodes',
       message: 'Are you sure you want to clear all nodes? This action cannot be undone.',
-      onConfirm: async () => {
-        try {
-          const response = await fetch('/api/nodes/clear', {
-            method: 'POST',
-          });
-
-          if (response.ok) {
-            // Clear all nodes and edges from state
-            setNodes([]);
-            setEdges([]);
-          }
-        } catch (error) {
-          console.error('Error clearing all nodes:', error);
-        }
+      onConfirm: () => {
+        executeClearAll();
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
+  }, [executeClearAll]);
+
+  const handleNodesChange = useCallback((updatedNodes: Node[]) => {
+    setNodes(updatedNodes);
   }, []);
-
-  // Update association positions when parent nodes move
-  const handleNodesWithAssociations = useCallback((updatedNodes: Node[]) => {
-    const result = updatedNodes.map(node => {
-      if (node.type === 'association') {
-        // Find the parent node
-        const assocNode = node as AssociationNodeType;
-        const parentNode = updatedNodes.find(n => n.id === assocNode.data.parentNodeId);
-
-        if (parentNode) {
-          // Recalculate position based on parent's current position
-          const angleRad = (assocNode.data.vectorDirection * Math.PI) / 180;
-          const newX = parentNode.position.x + Math.cos(angleRad) * assocNode.data.distance;
-          const newY = parentNode.position.y + Math.sin(angleRad) * assocNode.data.distance;
-
-          return {
-            ...node,
-            position: { x: newX, y: newY }
-          };
-        }
-      }
-      return node;
-    });
-
-    setNodes(result);
-  }, []);
-
-  const handleAssociationCreated = useCallback((association: any) => {
-    // Add association node
-    const newNode: AssociationNodeType = {
-      id: association.id,
-      type: 'association',
-      position: association.position,
-      draggable: false, // Associations can't be dragged independently
-      data: {
-        description: association.description,
-        prevNodeData: null,
-        nextNodeData: null,
-        parentNodeId: association.parentNodeId,
-        vectorDirection: association.vectorDirection,
-        distance: association.distance
-      }
-    };
-    setNodes(prev => [...prev, newNode]);
-
-    // Add edge without arrow marker
-    const newEdge: Edge = {
-      id: association.edgeId,
-      source: association.parentNodeId,
-      target: association.id,
-      type: 'straight',
-      style: { stroke: '#9333ea', strokeWidth: 2 }
-    };
-    setEdges(prev => [...prev, newEdge]);
-  }, []);
-
-  const handleChatResponse = useCallback((response: any) => {
-    // Create a new node from the response
-    const newNode: IdeaNode = {
-      id: response.id || Date.now().toString(),
-      type: 'idea',
-      position: response.position || {
-        x: 250 + (nodes.length * 50),
-        y: 250 + (nodes.length * 30)
-      },
-      data: {
-        title: response.title || 'New Idea',
-        body: response.body || '',
-        nextNodes: response.nextNodes || [],
-        prevNodes: response.prevNodes || [],
-        timestamp: response.timestamp || Date.now(),
-        onCreateAssociation: () => handleCreateAssociation(response.id, response.position)
-      }
-    };
-
-    // Add the new node
-    setNodes(prev => [...prev, newNode]);
-
-    // If there's a lastNodeId in the response, the edge was already created on the server
-    // We just need to add it to the UI
-    if (response.edgeCreated && nodes.length > 0) {
-      const lastNode = nodes[nodes.length - 1];
-      const newEdge: Edge = {
-        id: `${lastNode.id}-${newNode.id}`,
-        source: lastNode.id,
-        target: newNode.id,
-        type: 'default',
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 20,
-          height: 20,
-        },
-        label: 'follows',
-        style: { stroke: '#10b981', strokeWidth: 2 }
-      };
-      setEdges(prev => [...prev, newEdge]);
-    }
-  }, [nodes, handleCreateAssociation]);
 
   // Attach callbacks to all idea nodes
   const nodesWithCallbacks = nodes.map(node => {
@@ -271,8 +192,9 @@ export default function Home() {
         ...node,
         data: {
           ...node.data,
-          onCreateAssociation: () => handleCreateAssociation(node.id, node.position),
           onDeleteNode: () => handleDeleteNode(node.id),
+          onSelect: () => handleNodeSelect(node.id),
+          isSelected: selectedNodeId === node.id,
           isMenuOpen: openMenuNodeId === node.id,
           onMenuToggle: () => setOpenMenuNodeId(openMenuNodeId === node.id ? null : node.id)
         }
@@ -299,31 +221,26 @@ export default function Home() {
         <IdeaFlowCanvas
           nodes={nodesWithCallbacks}
           edges={edges}
-          onNodesChange={handleNodesWithAssociations}
+          onNodesChange={handleNodesChange}
           onEdgesChange={setEdges}
-          onPaneClick={() => setOpenMenuNodeId(null)}
+          onConnect={handleConnect}
+          onPaneClick={() => {
+            setOpenMenuNodeId(null);
+            setSelectedNodeId(null);
+          }}
         />
       </div>
 
       {/* Chat Prompt at Bottom */}
       <ChatPrompt
-        onResponse={handleChatResponse}
-        lastNodeId={nodes.length > 0 ? nodes[nodes.length - 1].id : undefined}
+        fetcher={chatFetcher}
+        lastNodeId={selectedNodeId || undefined}
+        disabled={nodes.filter(n => n.type === 'idea').length > 0 && !selectedNodeId}
+        noNodeSelected={nodes.filter(n => n.type === 'idea').length > 0 && !selectedNodeId}
       />
 
-      {/* Create Association Modal */}
-      {selectedNodeForAssociation && (
-        <CreateAssociationModal
-          isOpen={isModalOpen}
-          onClose={() => {
-            setIsModalOpen(false);
-            setSelectedNodeForAssociation(null);
-          }}
-          parentNodeId={selectedNodeForAssociation.id}
-          parentNodePosition={selectedNodeForAssociation.position}
-          onAssociationCreated={handleAssociationCreated}
-        />
-      )}
+      {/* Toast Container */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       {/* Node Count Indicator */}
       {nodes.length > 0 && (

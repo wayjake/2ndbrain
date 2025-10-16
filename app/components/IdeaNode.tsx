@@ -4,17 +4,29 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 interface IdeaNodeData {
   title: string;
   body: string;
-  onCreateAssociation?: () => void;
   onDeleteNode?: () => void;
+  onSelect?: () => void;
+  isSelected?: boolean;
   isMenuOpen?: boolean;
   onMenuToggle?: () => void;
 }
 
 function IdeaNode({ data }: NodeProps<IdeaNodeData>) {
   const isMenuOpen = data.isMenuOpen ?? false;
+  const isSelected = data.isSelected ?? false;
+
+  const borderClass = isSelected
+    ? "border-emerald-500 ring-4 ring-emerald-200"
+    : "border-blue-500 hover:border-blue-600";
 
   return (
-    <div className="bg-white rounded-lg shadow-md border-2 border-blue-500 min-w-[200px] max-w-[250px] relative">
+    <div
+      className={`bg-white rounded-lg shadow-md border-2 ${borderClass} min-w-[200px] max-w-[250px] relative cursor-pointer transition-all`}
+      onClick={(e) => {
+        e.stopPropagation();
+        data.onSelect?.();
+      }}
+    >
       {/* Handles for connections */}
       <Handle type="target" position={Position.Top} className="w-3 h-3 bg-blue-500" />
       <Handle type="source" position={Position.Bottom} className="w-3 h-3 bg-blue-500" />
@@ -51,19 +63,6 @@ function IdeaNode({ data }: NodeProps<IdeaNodeData>) {
                 style={{ zIndex: 1000 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    data.onCreateAssociation?.();
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2 cursor-pointer"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add Association
-                </button>
-
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

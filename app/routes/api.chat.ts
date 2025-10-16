@@ -1,19 +1,22 @@
 import type { Route } from "./+types/api.chat";
 import OpenAI from "openai";
-import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { saveNode, saveEdge, getAllNodes } from "../db/utils.server";
+import { saveNode } from "../db/utils.server";
+import { data } from "react-router";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const IdeaResponseSchema = z.object({
-  title: z.string().describe("A short, catchy title for the idea (3-6 words)"),
-  body: z.string().describe("A concise description of the idea (2-3 sentences)"),
-  nextNodes: z.array(z.string()).describe("Ideas that could logically follow or build upon this one"),
-  prevNodes: z.array(z.string()).describe("Ideas that could logically precede or lead to this one"),
+const IdeaResponse = z.object({
+  title: z.string().describe("A short, catchy title for the idea (1-7 words)"),
+  body: z.string().describe("A concise description of the idea (1-7 sentences)"),
 });
+
+type Idea = {
+  title: string;
+  body: string;
+}
 
 export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData();
@@ -21,7 +24,7 @@ export async function action({ request }: Route.ActionArgs) {
   const lastNodeId = formData.get("lastNodeId") as string | null;
 
   if (!prompt) {
-    return Response.json({ error: "Prompt is required" }, { status: 400 });
+    return data({ error: "Prompt is required" }, { status: 400 });
   }
 
   try {
@@ -30,75 +33,72 @@ export async function action({ request }: Route.ActionArgs) {
       input: [
         {
           role: "system",
-          content: `You are a helpful assistant that helps users organize and connect their ideas.
-          When a user provides an idea, create:
-          1. A short, catchy title (3-6 words) that captures the essence
-          2. A concise description of the idea (2-3 sentences) that expands on it
-          3. Suggestions for NEXT nodes - ideas that could logically follow or build upon this one
-          4. Suggestions for PREV nodes - ideas that could logically precede or lead to this one`
+          content: `You are a decision maker that helps users organize and connect their ideas.`
         },
         {
           role: "user",
           content: prompt
         }
       ],
+      
       text: {
-        format: zodTextFormat(IdeaResponseSchema, "idea_response"),
+        format: {
+          name: "idea_response",
+          strict: true,
+          type: "json_schema",
+          schema: z.toJSONSchema(IdeaResponse)
+        }
       },
     });
 
-    const responseData = response.output_parsed;
+    const responseData: Idea | undefined = response.output_parsed as unknown as Idea;
+
+    if (!responseData || !responseData.title || !responseData.body) {
+      return data({ error: "Failed to process request" }, { status: 500 });
+    }
 
     const nodeId = Date.now().toString();
     const timestamp = Date.now();
 
-    // Get existing nodes to calculate position
-    const existingNodes = await getAllNodes();
-    const nodeCount = existingNodes.length;
+    console.log('[API CHAT] Creating node with:', {
+      nodeId,
+      lastNodeId,
+      willSetPrevNode: !!lastNodeId
+    });
 
-    // Save node to database
+    // Save node to database (position will be calculated on frontend)
     await saveNode({
       id: nodeId,
       rawInput: prompt,
       title: responseData.title,
       body: responseData.body,
-      positionX: 250 + (nodeCount * 50),
-      positionY: 250 + (nodeCount * 30),
-      nextNodes: JSON.stringify(responseData.nextNodes || []),
-      prevNodes: JSON.stringify(responseData.prevNodes || []),
+      nextNode: null, // Will be set when nodes are connected
+      prevNode: lastNodeId || null, // Set previous node if provided
       timestamp: timestamp
     });
-    
-    // If there's a previous node, create an edge
-    let edgeCreated = false;
+
+    // If there's a previous node, update it to point to this new node
     if (lastNodeId) {
-      await saveEdge({
-        id: `${lastNodeId}-${nodeId}`,
-        source: lastNodeId,
-        target: nodeId,
-        label: 'follows',
-        type: 'default'
-      });
-      edgeCreated = true;
+      const { db } = await import("../db/db.server");
+      const { nodes } = await import("../db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      await db.update(nodes)
+        .set({ nextNode: nodeId })
+        .where(eq(nodes.id, lastNodeId));
     }
 
-    return Response.json({
+    return data({
+      success: true,
       id: nodeId,
-      rawInput: prompt,
       title: responseData.title,
       body: responseData.body,
-      nextNodes: responseData.nextNodes,
-      prevNodes: responseData.prevNodes,
-      timestamp,
-      position: {
-        x: 250 + (nodeCount * 50),
-        y: 250 + (nodeCount * 30)
-      },
-      edgeCreated
+      nextNode: null,
+      prevNode: lastNodeId,
+      timestamp
     });
   } catch (error) {
-    console.error("OpenAI API error:", error);
-    return Response.json(
+    return data(
       { error: "Failed to process request" },
       { status: 500 }
     );
