@@ -5,13 +5,13 @@ A visual idea mapping tool with AI assistance built with React Router v7, React 
 ## Features
 
 - **Visual Idea Mapping**: Create and organize ideas on an interactive canvas using React Flow
-- **AI-Powered Ideas**: Generate idea titles and summaries automatically with OpenAI
-- **Association Nodes**: Create contextual connections between ideas with custom descriptions
-- **Flow Connections**: Link ideas in sequential flows with visual edges
+- **AI-Powered Ideas**: Generate idea titles and summaries automatically with OpenAI (GPT-5 Mini)
+- **Sequential Flow**: Ideas automatically connect in a chain as you create them
+- **Smart Positioning**: Automatic vertical layout based on content height
 - **Interactive Canvas**: Drag nodes, pan, zoom, and arrange your idea space
 - **Persistent Storage**: SQLite database with Drizzle ORM for data persistence
-- **Real-time Updates**: Server-side rendering with optimistic UI updates
-- **Clean UI**: Tailwind CSS styling with a modern, minimalist design
+- **Toast Notifications**: Real-time feedback for all actions
+- **Clean UI**: Tailwind CSS v4 styling with a modern, minimalist design
 
 ## Tech Stack
 
@@ -85,21 +85,30 @@ idea-flow/
 │   ├── components/          # React components
 │   │   ├── IdeaFlowCanvas.tsx      # Main React Flow canvas
 │   │   ├── IdeaNode.tsx            # Idea node component
-│   │   ├── AssociationNode.tsx     # Association node component
 │   │   ├── ChatPrompt.tsx          # AI chat interface
-│   │   ├── CreateAssociationModal.tsx
-│   │   ├── ConfirmModal.tsx
-│   │   └── GlobalActionsMenu.tsx
+│   │   ├── Toast.tsx               # Toast notification component
+│   │   ├── ToastContainer.tsx      # Toast container
+│   │   ├── ConfirmModal.tsx        # Confirmation dialog
+│   │   └── GlobalActionsMenu.tsx   # Global actions menu
+│   ├── hooks/               # Custom React hooks
+│   │   ├── useToast.ts             # Toast notifications
+│   │   ├── useClearAll.ts          # Clear all functionality
+│   │   ├── useNodeConnect.ts       # Node connections
+│   │   ├── useNodeDelete.ts        # Node deletion
+│   │   ├── useIdeaChat.ts          # AI chat integration
+│   │   └── useConfirmModal.ts      # Confirmation modals
 │   ├── db/                  # Database setup
 │   │   ├── schema.ts        # Database schema definitions
-│   │   ├── config.ts        # Database configuration
+│   │   ├── db.server.ts     # Database configuration
 │   │   └── utils.server.ts  # Server-side database utilities
+│   ├── utils/               # Utility functions
+│   │   └── cn.ts            # Class name utility
 │   ├── routes/              # Route modules
 │   │   ├── home.tsx         # Main canvas page
 │   │   ├── api.chat.ts      # AI chat API endpoint
-│   │   ├── api.associations.ts  # Association CRUD
-│   │   ├── api.nodes.delete.ts
-│   │   └── api.nodes.clear.ts
+│   │   ├── api.nodes.connect.ts  # Node connection
+│   │   ├── api.nodes.delete.ts   # Node deletion
+│   │   └── api.nodes.clear.ts    # Clear all nodes
 │   ├── root.tsx             # Root layout
 │   ├── routes.ts            # Route configuration
 │   └── app.css              # Global styles
@@ -111,45 +120,42 @@ idea-flow/
 
 ## How It Works
 
-### Idea Nodes
+### Creating Ideas
 
-1. Type your idea into the chat prompt at the bottom
-2. AI generates a concise title and detailed summary
-3. A new node appears on the canvas with your idea
-4. Ideas automatically connect in sequence as you add them
-
-### Association Nodes
-
-1. Click the menu icon on any idea node
-2. Select "Create Association"
-3. Enter a description of how concepts relate
-4. Set the direction (angle) and distance for visual placement
-5. Association appears connected to the parent node with a purple line
+1. **First Idea**: Type your idea into the chat prompt at the bottom
+2. **AI Generation**: AI generates a concise title (1-7 words) and detailed summary (1-7 sentences)
+3. **Node Creation**: A new node appears on the canvas
+4. **Sequential Flow**: Select a node, then create the next idea to chain them together
+5. **Automatic Positioning**: Nodes are automatically positioned in a vertical flow
 
 ### Node Management
 
-- **Drag nodes**: Click and drag any idea node to reposition
-- **Delete node**: Open node menu and select delete
-- **Clear all**: Use the global menu to remove all nodes and start fresh
+- **Select Node**: Click on a node to select it (required for creating connected ideas)
+- **Delete Node**: Click the menu icon on a node and select delete
+  - Chain integrity is maintained - neighboring nodes reconnect automatically
+- **Clear All**: Use the global menu (top-right) to remove all nodes and start fresh
+- **Manual Connections**: Drag from a node's handle to another node to create custom connections
+
+### Positioning System
+
+- Nodes are positioned automatically based on their chain order
+- The first node (head) starts at the top
+- Each subsequent node is positioned below based on its predecessor's height
+- 50px spacing between nodes for clarity
 
 ## Database Schema
 
 ### Nodes Table
 - Stores idea nodes with AI-generated titles and bodies
-- Tracks position (x, y coordinates)
-- Maintains connections (nextNodes, prevNodes)
+- Maintains chain connections via `nextNode` and `prevNode` fields
 - Stores original user input and timestamp
+- **Note**: Positions are calculated dynamically, not stored
 
-### Edges Table
-- Defines connections between nodes
-- Supports different edge types (default flow vs associations)
-- Stores visual properties and labels
-
-### Associations Table
-- Special nodes that represent conceptual relationships
-- Positioned relative to parent nodes using vector math
-- Store angle (vectorDirection) and distance for placement
-- Can connect to previous or next ideas in the flow
+### Edges
+- **Not stored in database**
+- Generated dynamically from node relationships
+- Created from `nextNode` references when page loads
+- Green arrows showing sequential flow
 
 ## Environment Variables
 
@@ -195,6 +201,16 @@ Deploy to any platform supporting Node.js applications:
 - AWS ECS
 - Google Cloud Run
 
+## Recent Changes (v2.0)
+
+- ✅ Simplified to single node type (removed association nodes)
+- ✅ Removed edges database table (edges now generated dynamically)
+- ✅ Added custom hooks for better code organization
+- ✅ Fixed node deletion to maintain chain integrity
+- ✅ Added toast notification system
+- ✅ Updated AI model to GPT-5 Mini (2025-08-07)
+- ✅ Improved TypeScript typing throughout
+
 ## Contributing
 
 This is a personal project, but feedback and suggestions are welcome!
@@ -205,4 +221,4 @@ MIT
 
 ---
 
-Built with React Router v7 and React Flow
+Built with React Router v7, React Flow, and OpenAI GPT-5 Mini

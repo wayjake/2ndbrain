@@ -9,9 +9,9 @@ Idea Flow is a React Router v7 application that uses React Flow for interactive 
 ### Key Concepts
 
 - **Idea Nodes**: User-generated ideas with AI-created titles and summaries
-- **Association Nodes**: Contextual connections between ideas positioned using vector math
-- **Flow Edges**: Sequential connections showing idea progression
-- **Association Edges**: Purple lines connecting association nodes to parent ideas
+- **Node Chain**: Linear sequence of connected ideas (prevNode/nextNode relationships)
+- **Flow Edges**: Visual connections generated dynamically from node chain
+- **Positioning**: Automatic vertical layout based on node height estimation
 
 ## Styling
 
@@ -21,8 +21,7 @@ Idea Flow is a React Router v7 application that uses React Flow for interactive 
 - Responsive design principles: mobile-first approach
 - Color scheme:
   - Idea nodes: Emerald/green tones (`text-emerald-600`, `bg-emerald-50`)
-  - Association nodes: Purple tones (`text-purple-600`, `bg-purple-50`)
-  - Edges: Green for flow (`#10b981`), purple for associations (`#9333ea`)
+  - Edges: Green for flow (`#10b981`)
 - Avoid raw CSS unless absolutely necessary for React Flow customization
 
 ### Tailwind Configuration
@@ -42,25 +41,20 @@ The project uses Tailwind CSS v4 with Vite integration. Configuration is minimal
 
 - **IdeaNode.tsx**: Individual idea node component
   - Displays AI-generated title and body
-  - Contains menu for actions (create association, delete)
+  - Contains menu for actions (delete)
   - Handles timestamp formatting
   - Manages node-level interactions
-
-- **AssociationNode.tsx**: Association node component
-  - Shows association description
-  - Positioned relative to parent using vector direction and distance
-  - Non-draggable (moves with parent node)
 
 - **ChatPrompt.tsx**: AI chat input interface
   - Bottom-fixed input for creating new ideas
   - Submits to `/api/chat` endpoint
+  - Requires node selection to create connected ideas
   - Handles user input and API responses
 
-- **CreateAssociationModal.tsx**: Association creation modal
-  - Form for association description
-  - Vector direction input (0-360 degrees)
-  - Distance from parent node
-  - Submits to `/api/associations` endpoint
+- **Toast.tsx** & **ToastContainer.tsx**: Toast notification system
+  - Shows success, error, warning, and info messages
+  - Auto-dismiss after timeout
+  - Stacked notifications in bottom-right corner
 
 - **ConfirmModal.tsx**: Generic confirmation dialog
   - Used for delete and clear operations
@@ -71,36 +65,43 @@ The project uses Tailwind CSS v4 with Vite integration. Configuration is minimal
   - "Clear All" functionality
   - Future actions can be added here
 
+#### Custom Hooks (`app/hooks/`)
+
+- **useToast.ts**: Toast notification management
+- **useClearAll.ts**: Clear all nodes functionality
+- **useNodeConnect.ts**: Node connection logic
+- **useNodeDelete.ts**: Node deletion with chain maintenance
+- **useIdeaChat.ts**: AI chat integration
+
 ### API Routes (`app/routes/`)
 
 #### Main Route
 - **home.tsx**: Main application page
-  - Loader fetches all nodes, edges, and associations from database
-  - Transforms DB data to React Flow format
+  - Loader fetches all nodes from database
+  - Calculates node positions based on chain (prevNode/nextNode)
+  - Generates edges dynamically from node relationships
   - Manages client-side state for nodes and edges
-  - Handles association position calculations on parent node movement
 
 #### API Endpoints
 - **api.chat.ts**: AI-powered idea creation
-  - Accepts user input
-  - Calls OpenAI to generate title and body
-  - Creates node in database
-  - Creates edge if connecting to previous node
+  - Accepts user input and parent node ID
+  - Calls OpenAI (gpt-5-mini-2025-08-07) to generate title and body
+  - Creates node in database with prevNode reference
+  - Updates parent node's nextNode reference
   - Returns formatted response
 
-- **api.associations.ts**: Association CRUD operations
-  - Creates association nodes
-  - Calculates position based on vector and distance
-  - Creates edge connecting to parent node
-  - Stores association metadata
+- **api.nodes.connect.ts**: Manual node connection
+  - Connects two existing nodes
+  - Updates prevNode/nextNode relationships
+  - Validates connection constraints
 
 - **api.nodes.delete.ts**: Delete individual nodes
   - Removes node from database
-  - Cascades to associated edges
-  - Updates connected nodes' prev/next arrays
+  - Maintains chain integrity by updating neighboring nodes
+  - Reconnects previous and next nodes
 
 - **api.nodes.clear.ts**: Clear all nodes
-  - Removes all nodes, edges, and associations
+  - Removes all nodes from database
   - Used for starting fresh
 
 ### Database Layer (`app/db/`)
@@ -112,34 +113,28 @@ The project uses Tailwind CSS v4 with Vite integration. Configuration is minimal
 - rawInput (text) - Original user input
 - title (text) - AI-generated title
 - body (text) - AI-generated summary
-- positionX, positionY (real) - Canvas coordinates
-- nextNodes, prevNodes (text) - JSON arrays of connected node IDs
+- nextNode (text) - ID of next node in chain
+- prevNode (text) - ID of previous node in chain
 - timestamp (integer)
+- createdAt (integer)
 
-// Edges table: Stores connections
-- id (text, primary key)
-- source, target (text) - Node IDs
-- label (text) - Optional edge label
-- type (text) - 'default' or 'association'
-
-// Associations table: Stores association nodes
-- id (text, primary key)
-- parentNodeId (text) - Parent idea node
-- description (text) - Association description
-- vectorDirection (real) - Angle 0-360 degrees
-- distance (real) - Distance from parent in pixels
-- prevNodeData, nextNodeData (text) - JSON context data
+// Note: Edges are NOT stored in database
+// They are generated dynamically from nextNode relationships
 ```
 
 #### Utilities (`utils.server.ts`)
 - `getAllNodes()`: Fetch all idea nodes
-- `getAllEdges()`: Fetch all edges
-- `getAllAssociations()`: Fetch all associations
-- CRUD operations for nodes, edges, associations
+- `getNodeById(id)`: Fetch single node by ID
+- `saveNode(nodeData)`: Insert new node
+- `deleteNode(id)`: Delete node and update chain
+- CRUD operations for nodes
 
-#### Configuration (`config.ts`)
+#### Configuration (`db.server.ts`)
 - Drizzle ORM setup with better-sqlite3
 - Database connection configuration
+
+#### Utils (`app/utils/`)
+- `cn.ts`: Class name utility for conditional Tailwind classes
 
 ## Development Workflow
 
@@ -178,44 +173,65 @@ npm run db:studio
 
 ## Key Implementation Details
 
-### Vector-Based Positioning
+### Chain-Based Positioning
 
-Association nodes use polar coordinates for positioning:
+Nodes are positioned automatically based on their chain order:
 ```typescript
-// Calculate position from parent
-const angleRad = (vectorDirection * Math.PI) / 180;
-const positionX = parentX + Math.cos(angleRad) * distance;
-const positionY = parentY + Math.sin(angleRad) * distance;
+// Find head node (no prevNode)
+const headNode = dbNodes.find(n => !n.prevNode);
+
+// Walk the chain and calculate positions
+let currentY = 100;
+const centerX = 400;
+
+while (currentNode) {
+  nodePositions.set(currentNode.id, { x: centerX, y: currentY });
+
+  // Calculate height based on content
+  const nodeHeight = estimateNodeHeight(currentNode.title, currentNode.body);
+  currentY += nodeHeight + 50; // 50px spacing
+
+  // Move to next node
+  currentNode = dbNodes.find(n => n.id === currentNode.nextNode);
+}
 ```
 
-### Node Movement with Associations
+### Node Chain Integrity
 
-When idea nodes move, associated nodes must follow:
+When deleting nodes, the chain is maintained:
 ```typescript
-// In home.tsx: handleNodesWithAssociations
-// Recalculate association positions when parent moves
-// Updates both position and edge connections
+// In deleteNode():
+// 1. Get the node to delete
+// 2. Update previous node's nextNode to point to this node's nextNode
+// 3. Update next node's prevNode to point to this node's prevNode
+// 4. Delete the node
 ```
 
 ### AI Integration
 
 OpenAI integration for idea generation:
-- Model: GPT-4 or GPT-3.5-turbo
-- Prompt engineering for concise titles and detailed bodies
-- Structured output for consistent formatting
+- Model: **gpt-5-mini-2025-08-07**
+- Structured output using Zod schema validation
+- Concise titles (1-7 words) and detailed bodies (1-7 sentences)
+- Decision-maker system prompt for focused responses
 
-### Edge Styling
+### Edge Generation
 
-Two types of edges:
-1. **Flow edges** (green): Show sequential idea progression
-   - Include arrow markers
-   - Default curved style
-   - Label: "follows"
-
-2. **Association edges** (purple): Connect associations to parents
-   - No arrow markers
-   - Straight lines
-   - No labels
+Edges are generated dynamically, not stored in database:
+```typescript
+// Create edges from node relationships
+const edges = dbNodes
+  .filter(node => node.nextNode)
+  .map(node => ({
+    id: `${node.id}-${node.nextNode}`,
+    source: node.id,
+    target: node.nextNode,
+    type: 'default',
+    markerEnd: { type: MarkerType.ArrowClosed },
+    label: 'next',
+    style: { stroke: '#10b981', strokeWidth: 2 }
+  }));
+```
 
 ## Environment Variables
 
@@ -357,19 +373,30 @@ docker run -p 3000:3000 \
 - Check rate limits and quotas
 - Review API response format changes
 
+## Recent Changes
+
+### Version 2.0 Refactor
+- ✅ Removed association nodes feature (simplified to single node type)
+- ✅ Removed edges database table (edges now generated dynamically)
+- ✅ Added custom hooks for better code organization
+- ✅ Fixed node deletion to maintain chain integrity
+- ✅ Added toast notification system
+- ✅ Updated AI model to gpt-5-mini-2025-08-07
+- ✅ Improved TypeScript typing throughout
+
 ## Future Enhancements
 
 Potential features to consider:
 - [ ] Multiple canvas workspaces
 - [ ] Export/import functionality
-- [ ] Collaborative editing
-- [ ] Custom node colors and styles
+- [ ] Branching node chains (multiple paths)
+- [ ] Node templates and categories
 - [ ] Search and filter nodes
 - [ ] Undo/redo functionality
 - [ ] Keyboard shortcuts
 - [ ] Mobile responsive design
 - [ ] Dark mode
-- [ ] Node templates
+- [ ] Collaborative editing
 
 ## Git Workflow
 
