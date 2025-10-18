@@ -4,7 +4,6 @@ import { useLoaderData } from 'react-router';
 import IdeaFlowCanvas, { type IdeaNode } from '../components/IdeaFlowCanvas';
 import ChatPrompt from '../components/ChatPrompt';
 import GlobalActionsMenu from '../components/GlobalActionsMenu';
-import ConfirmModal from '../components/ConfirmModal';
 import ToastContainer from '../components/ToastContainer';
 import { type Edge, MarkerType, type Node, type Connection } from '@xyflow/react';
 import { getAllNodes } from '../db/utils.server';
@@ -13,6 +12,7 @@ import { useNodeConnect } from '../hooks/useNodeConnect';
 import { useClearAll } from '../hooks/useClearAll';
 import { useNodeDelete } from '../hooks/useNodeDelete';
 import { useIdeaChat } from '../hooks/useIdeaChat';
+import { useConfirmModal } from '../hooks/useConfirmModal';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -127,23 +127,13 @@ export default function Home() {
   const [edges, setEdges] = useState<Edge<any>[]>(initialEdges as Edge<any>[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-  });
 
   // Custom hooks
   const { toasts, addToast, dismissToast } = useToast();
+  const { confirm, ConfirmModal } = useConfirmModal();
   const { handleConnect } = useNodeConnect({ nodes, addToast });
-  const { executeClearAll } = useClearAll({ addToast });
-  const { handleDeleteNode: deleteNode } = useNodeDelete({ addToast });
+  const { handleClearAll } = useClearAll({ addToast, confirm });
+  const { handleDeleteNode } = useNodeDelete({ addToast, confirm });
   const { chatFetcher } = useIdeaChat({ addToast });
 
   // Update local state when loader data changes (after revalidation)
@@ -156,30 +146,6 @@ export default function Home() {
     setSelectedNodeId(nodeId);
     setOpenMenuNodeId(null); // Close any open menus
   }, []);
-
-  const handleDeleteNode = useCallback((nodeId: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Delete Node',
-      message: 'Are you sure you want to delete this node? This will also delete all associated connections.',
-      onConfirm: () => {
-        deleteNode(nodeId);
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
-  }, [deleteNode]);
-
-  const handleClearAll = useCallback(() => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Clear All Nodes',
-      message: 'Are you sure you want to clear all nodes? This action cannot be undone.',
-      onConfirm: () => {
-        executeClearAll();
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-      }
-    });
-  }, [executeClearAll]);
 
   const handleNodesChange = useCallback((updatedNodes: Node[]) => {
     setNodes(updatedNodes);
@@ -252,15 +218,7 @@ export default function Home() {
       )}
 
       {/* Confirm Modal */}
-      <ConfirmModal
-        isOpen={confirmModal.isOpen}
-        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-        onConfirm={confirmModal.onConfirm}
-        title={confirmModal.title}
-        message={confirmModal.message}
-        confirmText="Delete"
-        confirmStyle="danger"
-      />
+      <ConfirmModal />
     </div>
   );
 }

@@ -1,19 +1,36 @@
 import { useCallback, useEffect } from 'react';
 import { useFetcher } from 'react-router';
 
-interface ClearAllOptions {
-  addToast: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
+interface ConfirmOptions {
+  title: string;
+  message: string;
+  confirmText?: string;
+  confirmStyle?: 'danger' | 'primary';
+  onConfirm: () => void;
 }
 
-export function useClearAll({ addToast }: ClearAllOptions) {
+interface ClearAllOptions {
+  addToast: (message: string, type: 'info' | 'success' | 'warning' | 'error') => void;
+  confirm: (options: ConfirmOptions) => void;
+}
+
+export function useClearAll({ addToast, confirm }: ClearAllOptions) {
   const clearFetcher = useFetcher();
 
-  const executeClearAll = useCallback(() => {
-    clearFetcher.submit({}, {
-      method: 'POST',
-      action: '/api/nodes/clear'
+  const handleClearAll = useCallback(() => {
+    confirm({
+      title: 'Clear All Nodes',
+      message: 'Are you sure you want to clear all nodes? This action cannot be undone.',
+      confirmText: 'Clear All',
+      confirmStyle: 'danger',
+      onConfirm: () => {
+        clearFetcher.submit({}, {
+          method: 'POST',
+          action: '/api/nodes/clear'
+        });
+      }
     });
-  }, [clearFetcher]);
+  }, [confirm, clearFetcher]);
 
   // Monitor fetcher state and fire toasts
   useEffect(() => {
@@ -27,6 +44,6 @@ export function useClearAll({ addToast }: ClearAllOptions) {
   }, [clearFetcher.state, clearFetcher.data, addToast]);
 
   return {
-    executeClearAll
+    handleClearAll
   };
 }
