@@ -1,12 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { Route } from "./+types/home";
-import { useLoaderData } from 'react-router';
+import { useLoaderData, useFetcher } from 'react-router';
 import IdeaFlowCanvas, { type IdeaNode } from '../components/IdeaFlowCanvas';
 import ChatPrompt from '../components/ChatPrompt';
 import GlobalActionsMenu from '../components/GlobalActionsMenu';
 import ToastContainer from '../components/ToastContainer';
+import CreateAttributeModal from '../components/CreateAttributeModal';
 import { type Edge, MarkerType, type Node, type Connection } from '@xyflow/react';
-import { getAllNodes } from '../db/utils.server';
+import { getAllNodes, getAllAttributes } from '../db/utils.server';
 import { useToast } from '../hooks/useToast';
 import { useNodeConnect } from '../hooks/useNodeConnect';
 import { useClearAll } from '../hooks/useClearAll';
@@ -118,7 +119,66 @@ export async function loader({ request }: Route.LoaderArgs) {
       style: { stroke: '#10b981', strokeWidth: 2 }
     })) as Edge[];
 
-  return { nodes: ideaNodes, edges };
+  // Fetch all attributes
+  const dbAttributes = await getAllAttributes();
+
+  // Group attributes by parent node
+  const attributesByNode = new Map<string, typeof dbAttributes>();
+  for (const attr of dbAttributes) {
+    if (!attributesByNode.has(attr.nodeId)) {
+      attributesByNode.set(attr.nodeId, []);
+    }
+    attributesByNode.get(attr.nodeId)!.push(attr);
+  }
+
+  // Create attribute nodes with positioning
+  const attributeNodes: Node[] = [];
+  const attributeEdges: Edge[] = [];
+
+  attributesByNode.forEach((attributes, parentNodeId) => {
+    const parentPosition = nodePositions.get(parentNodeId);
+    if (!parentPosition) return;
+
+    attributes.forEach((attr, index) => {
+      // Alternate left (odd) and right (even) sides
+      const isRight = index % 2 === 0;
+      const side = isRight ? 1 : -1;
+      const horizontalOffset = 150;
+
+      // Calculate position
+      const attributeX = parentPosition.x + (side * horizontalOffset);
+      const attributeY = parentPosition.y + (Math.floor(index / 2) * 80);
+
+      // Create attribute node
+      attributeNodes.push({
+        id: attr.id,
+        type: 'attribute',
+        position: { x: attributeX, y: attributeY },
+        data: {
+          value: attr.value,
+          attributeKey: attr.key,
+          parentNodeId: attr.nodeId
+        }
+      });
+
+      // Create edge connecting attribute to parent
+      attributeEdges.push({
+        id: `attr-edge-${attr.id}`,
+        source: parentNodeId,
+        target: attr.id,
+        type: 'default',
+        label: attr.key,
+        style: { stroke: '#ef4444', strokeWidth: 2 },
+        markerEnd: undefined
+      } as Edge);
+    });
+  });
+
+  // Combine all nodes and edges
+  const allNodes = [...ideaNodes, ...attributeNodes];
+  const allEdges = [...edges, ...attributeEdges];
+
+  return { nodes: allNodes, edges: allEdges };
 }
 
 export default function Home() {
@@ -127,6 +187,8 @@ export default function Home() {
   const [edges, setEdges] = useState<Edge<any>[]>(initialEdges as Edge<any>[]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [openMenuNodeId, setOpenMenuNodeId] = useState<string | null>(null);
+  const [isAttributeModalOpen, setIsAttributeModalOpen] = useState(false);
+  const [selectedNodeForAttribute, setSelectedNodeForAttribute] = useState<string | null>(null);
 
   // Custom hooks
   const { toasts, addToast, dismissToast } = useToast();
@@ -136,14 +198,32 @@ export default function Home() {
   const { handleDeleteNode } = useNodeDelete({ addToast, confirm });
   const { chatFetcher } = useIdeaChat({ addToast });
 
+  // Attribute creation fetcher
+  const attributeFetcher = useFetcher();
+
   // Update local state when loader data changes (after revalidation)
   useEffect(() => {
     setNodes(initialNodes);
     setEdges(initialEdges as Edge<any>[]);
   }, [initialNodes, initialEdges]);
 
+  // Handle attribute creation success
+  useEffect(() => {
+    if (attributeFetcher.state === 'idle' && attributeFetcher.data?.success) {
+      addToast('Attribute added successfully', 'success');
+      setIsAttributeModalOpen(false);
+      setSelectedNodeForAttribute(null);
+    }
+  }, [attributeFetcher.state, attributeFetcher.data, addToast]);
+
   const handleNodeSelect = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId);
+    setOpenMenuNodeId(null); // Close any open menus
+  }, []);
+
+  const handleCreateAttribute = useCallback((nodeId: string) => {
+    setSelectedNodeForAttribute(nodeId);
+    setIsAttributeModalOpen(true);
     setOpenMenuNodeId(null); // Close any open menus
   }, []);
 
@@ -160,6 +240,7 @@ export default function Home() {
           ...node.data,
           onDeleteNode: () => handleDeleteNode(node.id),
           onSelect: () => handleNodeSelect(node.id),
+          onCreateAttribute: () => handleCreateAttribute(node.id),
           isSelected: selectedNodeId === node.id,
           isMenuOpen: openMenuNodeId === node.id,
           onMenuToggle: () => setOpenMenuNodeId(openMenuNodeId === node.id ? null : node.id)
@@ -219,6 +300,19 @@ export default function Home() {
 
       {/* Confirm Modal */}
       <ConfirmModal />
+
+      {/* Create Attribute Modal */}
+      {selectedNodeForAttribute && (
+        <CreateAttributeModal
+          isOpen={isAttributeModalOpen}
+          onClose={() => {
+            setIsAttributeModalOpen(false);
+            setSelectedNodeForAttribute(null);
+          }}
+          parentNodeId={selectedNodeForAttribute}
+          fetcher={attributeFetcher}
+        />
+      )}
     </div>
   );
 }

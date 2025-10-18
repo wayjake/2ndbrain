@@ -17,6 +17,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import IdeaNodeComponent from './IdeaNode';
+import AttributeNodeComponent from './AttributeNode';
 
 export interface IdeaNode extends Node {
   type: 'idea';
@@ -35,7 +36,8 @@ export interface IdeaNode extends Node {
 }
 
 const nodeTypes = {
-  idea: IdeaNodeComponent
+  idea: IdeaNodeComponent,
+  attribute: AttributeNodeComponent
 };
 
 export default function IdeaFlowCanvas({

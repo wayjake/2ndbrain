@@ -6,6 +6,7 @@ interface IdeaNodeData {
   body: string;
   onDeleteNode?: () => void;
   onSelect?: () => void;
+  onCreateAttribute?: () => void;
   isSelected?: boolean;
   isMenuOpen?: boolean;
   onMenuToggle?: () => void;
@@ -63,6 +64,18 @@ function IdeaNode({ data }: NodeProps<IdeaNodeData>) {
                 style={{ zIndex: 1000 }}
                 onMouseDown={(e) => e.stopPropagation()}
               >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    data.onCreateAttribute?.();
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                  </svg>
+                  Add Attribute
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

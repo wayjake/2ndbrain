@@ -1,21 +1,33 @@
 import type { Route } from "./+types/api.chat";
 import OpenAI from "openai";
 import { z } from "zod";
-import { saveNode } from "../db/utils.server";
+import { saveNode, saveAttribute } from "../db/utils.server";
 import { data } from "react-router";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const ConsciousScale = z.object({
+  value: z.number().min(0).max(1000).describe("A numeric value from 0 to 1000 representing the conscious scale rating"),
+  level: z.string().describe("A one or two word code representing the emotional/conscious level (e.g., love, joy, anger)"),
+  description: z.string().describe("A short description explaining how this rating was received")
+});
+
 const IdeaResponse = z.object({
   title: z.string().describe("A short, catchy title for the idea (1-7 words)"),
   body: z.string().describe("A concise description of the idea (1-7 sentences)"),
+  consciousScale: ConsciousScale.describe("The conscious scale rating for this idea based on David R. Hawkins’ Scale of Consciousness")
 });
 
 type Idea = {
   title: string;
   body: string;
+  consciousScale: {
+    value: number;
+    level: string;
+    description: string;
+  };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -33,7 +45,9 @@ export async function action({ request }: Route.ActionArgs) {
       input: [
         {
           role: "system",
-          content: `You are a decision maker that helps users organize and connect their ideas.`
+          content: `You are a decision maker that helps users organize and connect their ideas. 
+                    You will rate this user's thought or ideas conscious scale based on David R. Hawkins’ Scale of Consciousness.
+                    `
         },
         {
           role: "user",
@@ -53,7 +67,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const responseData: Idea | undefined = response.output_parsed as unknown as Idea;
 
-    if (!responseData || !responseData.title || !responseData.body) {
+    if (!responseData || !responseData.title || !responseData.body || !responseData.consciousScale) {
       return data({ error: "Failed to process request" }, { status: 500 });
     }
 
@@ -75,6 +89,18 @@ export async function action({ request }: Route.ActionArgs) {
       nextNode: null, // Will be set when nodes are connected
       prevNode: lastNodeId || null, // Set previous node if provided
       timestamp: timestamp
+    });
+
+    // Automatically create consciousScale attribute
+    const attributeId = `${nodeId}-consciousScale`;
+    const attributeValue = `${responseData.consciousScale.level} (${responseData.consciousScale.value})`;
+    await saveAttribute({
+      id: attributeId,
+      nodeId: nodeId,
+      key: "consciousScale",
+      value: attributeValue,
+      description: responseData.consciousScale.description,
+      createdAt: timestamp
     });
 
     // If there's a previous node, update it to point to this new node

@@ -1,5 +1,5 @@
 import { db } from './db.server';
-import { nodes, type NewNode } from './schema';
+import { nodes, attributes, type NewNode, type NewAttribute } from './schema';
 import { eq } from 'drizzle-orm';
 
 export async function saveNode(nodeData: NewNode) {
@@ -38,6 +38,33 @@ export async function deleteNode(id: string) {
       .where(eq(nodes.id, nodeToDelete.nextNode));
   }
 
+  // Delete associated attributes
+  await db.delete(attributes).where(eq(attributes.nodeId, id));
+
   // Finally, delete the node
   return await db.delete(nodes).where(eq(nodes.id, id));
+}
+
+// Attribute operations
+export async function getAllAttributes() {
+  return await db.select().from(attributes).orderBy(attributes.createdAt);
+}
+
+export async function getAttributesByNodeId(nodeId: string) {
+  return await db.select().from(attributes).where(eq(attributes.nodeId, nodeId));
+}
+
+export async function saveAttribute(attributeData: NewAttribute) {
+  return await db.insert(attributes).values(attributeData).returning();
+}
+
+export async function updateAttribute(id: string, updates: Partial<NewAttribute>) {
+  return await db.update(attributes)
+    .set(updates)
+    .where(eq(attributes.id, id))
+    .returning();
+}
+
+export async function deleteAttribute(id: string) {
+  return await db.delete(attributes).where(eq(attributes.id, id));
 }

@@ -11,5 +11,16 @@ export const nodes = sqliteTable('nodes', {
   createdAt: integer('created_at').notNull().default(Date.now()),
 });
 
+export const attributes = sqliteTable('attributes', {
+  id: text('id').primaryKey(),
+  nodeId: text('node_id').notNull(), // Parent idea node
+  key: text('key').notNull(), // Attribute key/name
+  value: text('value').notNull(), // Attribute value
+  description: text('description'), // Optional description (not shown in UI)
+  createdAt: integer('created_at').notNull().default(Date.now()),
+});
+
 export type Node = typeof nodes.$inferSelect;
 export type NewNode = typeof nodes.$inferInsert;
+export type Attribute = typeof attributes.$inferSelect;
+export type NewAttribute = typeof attributes.$inferInsert;
