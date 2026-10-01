@@ -1,11 +1,10 @@
 import type { Route } from "./+types/api.nodes.clear";
-import { db } from "../db/db.server";
-import { nodes } from "../db/schema";
+import { clearAllNodes } from "../db/utils.server";
 
 export async function action({ request }: Route.ActionArgs) {
   try {
-    // Delete all nodes
-    await db.delete(nodes);
+    // Delete all nodes and their attributes
+    clearAllNodes();
 
     return Response.json({ success: true });
   } catch (error) {

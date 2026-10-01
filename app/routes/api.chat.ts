@@ -1,7 +1,7 @@
 import type { Route } from "./+types/api.chat";
 import OpenAI from "openai";
 import { z } from "zod";
-import { saveNode, saveAttribute } from "../db/utils.server";
+import { insertNodeAfter } from "../db/utils.server";
 import { data } from "react-router";
 
 const openai = new OpenAI({
@@ -80,38 +80,29 @@ export async function action({ request }: Route.ActionArgs) {
       willSetPrevNode: !!lastNodeId
     });
 
-    // Save node to database (position will be calculated on frontend)
-    await saveNode({
-      id: nodeId,
-      rawInput: prompt,
-      title: responseData.title,
-      body: responseData.body,
-      nextNode: null, // Will be set when nodes are connected
-      prevNode: lastNodeId || null, // Set previous node if provided
-      timestamp: timestamp
-    });
+    // Save node and its consciousScale attribute, splicing the node into the
+    // chain after the selected node (position will be calculated on frontend)
+    const inserted = insertNodeAfter(
+      {
+        id: nodeId,
+        rawInput: prompt,
+        title: responseData.title,
+        body: responseData.body,
+        timestamp: timestamp
+      },
+      lastNodeId || null,
+      [{
+        id: `${nodeId}-consciousScale`,
+        nodeId: nodeId,
+        key: "consciousScale",
+        value: `${responseData.consciousScale.level} (${responseData.consciousScale.value})`,
+        description: responseData.consciousScale.description,
+        createdAt: timestamp
+      }]
+    );
 
-    // Automatically create consciousScale attribute
-    const attributeId = `${nodeId}-consciousScale`;
-    const attributeValue = `${responseData.consciousScale.level} (${responseData.consciousScale.value})`;
-    await saveAttribute({
-      id: attributeId,
-      nodeId: nodeId,
-      key: "consciousScale",
-      value: attributeValue,
-      description: responseData.consciousScale.description,
-      createdAt: timestamp
-    });
-
-    // If there's a previous node, update it to point to this new node
-    if (lastNodeId) {
-      const { db } = await import("../db/db.server");
-      const { nodes } = await import("../db/schema");
-      const { eq } = await import("drizzle-orm");
-
-      await db.update(nodes)
-        .set({ nextNode: nodeId })
-        .where(eq(nodes.id, lastNodeId));
+    if (!inserted) {
+      return data({ error: "The selected idea no longer exists" }, { status: 404 });
     }
 
     return data({
@@ -119,11 +110,11 @@ export async function action({ request }: Route.ActionArgs) {
       id: nodeId,
       title: responseData.title,
       body: responseData.body,
-      nextNode: null,
       prevNode: lastNodeId,
       timestamp
     });
   } catch (error) {
+    console.error("Error creating idea:", error);
     return data(
       { error: "Failed to process request" },
       { status: 500 }

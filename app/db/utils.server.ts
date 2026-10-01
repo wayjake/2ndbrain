@@ -6,8 +6,49 @@ export async function saveNode(nodeData: NewNode) {
   return await db.insert(nodes).values(nodeData).returning();
 }
 
+// Insert a node directly after `prevId`, splicing it in front of whatever
+// followed so the rest of the chain stays connected. Runs in one transaction.
+// Returns false if `prevId` no longer exists.
+export function insertNodeAfter(
+  nodeData: NewNode,
+  prevId: string | null,
+  nodeAttributes: NewAttribute[] = []
+) {
+  return db.transaction((tx) => {
+    let nextId: string | null = null;
+
+    if (prevId) {
+      const prev = tx.select().from(nodes).where(eq(nodes.id, prevId)).get();
+      if (!prev) return false;
+      nextId = prev.nextNode;
+    }
+
+    tx.insert(nodes).values({ ...nodeData, prevNode: prevId, nextNode: nextId }).run();
+
+    if (prevId) {
+      tx.update(nodes).set({ nextNode: nodeData.id }).where(eq(nodes.id, prevId)).run();
+    }
+    if (nextId) {
+      tx.update(nodes).set({ prevNode: nodeData.id }).where(eq(nodes.id, nextId)).run();
+    }
+
+    for (const attr of nodeAttributes) {
+      tx.insert(attributes).values(attr).run();
+    }
+
+    return true;
+  });
+}
+
 export async function getAllNodes() {
-  return await db.select().from(nodes).orderBy(nodes.createdAt);
+  return await db.select().from(nodes).orderBy(nodes.timestamp);
+}
+
+export function clearAllNodes() {
+  db.transaction((tx) => {
+    tx.delete(attributes).run();
+    tx.delete(nodes).run();
+  });
 }
 
 export async function getNodeById(id: string) {
