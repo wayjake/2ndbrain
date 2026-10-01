@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "bootstrapped_at": "2026-10-01T21:26:28Z",
+  "discovery_branch": "codepress/bootstrap/dev-server/bcc2ef6675824df9",
+  "frontends": [
+    {
+      "label": "web",
+      "working_dir": "",
+      "description": "Visual idea-mapping canvas with AI-assisted idea generation.",
+      "dockerfile_path": ".codepress/dev-server/Dockerfile.web",
+      "dev_command": "npm run dev -- --host \"$CODEPRESS_BIND_HOST\" --port \"$PORT\"",
+      "prebuild_command": "",
+      "prebuild_inputs": [],
+      "framework": "vite",
+      "package_manager": "npm",
+      "install_command": "npm install",
+      "dependency_manifests": ["package-lock.json"],
+      "dev_port": 5173,
+      "system_packages": ["procps"],
+      "size": "medium"
+    }
+  ]
+}
