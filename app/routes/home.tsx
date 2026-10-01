@@ -44,50 +44,43 @@ export async function loader({ request }: Route.LoaderArgs) {
     return baseHeight + titleHeight + bodyHeight;
   };
 
-  // Calculate positions for nodes in linear order
+  // Calculate positions: each chain is laid out top-to-bottom in its own column
   const nodePositions = new Map<string, { x: number; y: number }>();
+  const nodesById = new Map(dbNodes.map(n => [n.id, n]));
+  const startX = 400;
+  const columnSpacing = 550; // Room for the card plus attributes on either side
 
-  // Find the head node (no prevNode)
-  const headNode = dbNodes.find(n => !n.prevNode);
+  // Chains start at nodes with no prevNode; any nodes left over afterwards
+  // form a loop, so start a column from the earliest of those too
+  const chainStarts = dbNodes.filter(n => !n.prevNode);
+  let column = 0;
 
-  console.log('[LOADER] Node chain analysis:', {
-    totalNodes: dbNodes.length,
-    headNode: headNode ? { id: headNode.id, title: headNode.title } : null,
-    allNodesPrevNext: dbNodes.map(n => ({ id: n.id, prevNode: n.prevNode, nextNode: n.nextNode }))
-  });
-
-  if (headNode) {
-    // Start position
+  const layoutChain = (start: typeof dbNodes[number]) => {
     let currentY = 100;
-    const centerX = 400;
+    const x = startX + column * columnSpacing;
+    let currentNode: typeof start | undefined = start;
 
-    // Walk the chain from head to tail
-    let currentNode: typeof headNode | null = headNode;
-    let chainLength = 0;
-    while (currentNode) {
-      nodePositions.set(currentNode.id, { x: centerX, y: currentY });
-      console.log(`[LOADER] Positioned node ${currentNode.id} at (${centerX}, ${currentY})`);
-      chainLength++;
+    while (currentNode && !nodePositions.has(currentNode.id)) {
+      nodePositions.set(currentNode.id, { x, y: currentY });
 
       // Calculate height of current node for spacing
       const nodeHeight = estimateNodeHeight(currentNode.title, currentNode.body);
       currentY += nodeHeight + 50; // 50px spacing between nodes
 
       // Move to next node in chain
-      if (currentNode.nextNode) {
-        const nextNodeId: string = currentNode.nextNode;
-        currentNode = dbNodes.find(n => n.id === nextNodeId) ?? null;
-      } else {
-        break;
-      }
+      currentNode = currentNode.nextNode ? nodesById.get(currentNode.nextNode) : undefined;
     }
-    console.log(`[LOADER] Positioned ${chainLength} nodes in chain`);
+    column++;
+  };
+
+  chainStarts.forEach(layoutChain);
+  for (const node of dbNodes) {
+    if (!nodePositions.has(node.id)) layoutChain(node);
   }
 
   // Transform database nodes to React Flow nodes with calculated positions
   const ideaNodes: IdeaNode[] = dbNodes.map(node => {
-    const position = nodePositions.get(node.id) || { x: 400, y: 100 };
-    console.log(`[LOADER] Node ${node.id} final position:`, position, `(was in map: ${nodePositions.has(node.id)})`);
+    const position = nodePositions.get(node.id)!;
     return {
       id: node.id,
       type: 'idea',
@@ -250,6 +243,8 @@ export default function Home() {
     return node;
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const ideaCount = nodes.filter(n => n.type === 'idea').length;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-gray-50">
       {/* Header */}
@@ -282,18 +277,18 @@ export default function Home() {
       <ChatPrompt
         fetcher={chatFetcher}
         lastNodeId={selectedNodeId || undefined}
-        disabled={nodes.filter(n => n.type === 'idea').length > 0 && !selectedNodeId}
-        noNodeSelected={nodes.filter(n => n.type === 'idea').length > 0 && !selectedNodeId}
+        disabled={ideaCount > 0 && !selectedNodeId}
+        noNodeSelected={ideaCount > 0 && !selectedNodeId}
       />
 
       {/* Toast Container */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
       {/* Node Count Indicator */}
-      {nodes.length > 0 && (
+      {ideaCount > 0 && (
         <div className="absolute top-20 right-4 bg-white rounded-lg shadow-md px-3 py-2 z-40">
           <span className="text-sm text-gray-600">
-            {nodes.length} {nodes.length === 1 ? 'idea' : 'ideas'}
+            {ideaCount} {ideaCount === 1 ? 'idea' : 'ideas'}
           </span>
         </div>
       )}

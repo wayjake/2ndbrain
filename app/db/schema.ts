@@ -8,7 +8,7 @@ export const nodes = sqliteTable('nodes', {
   nextNode: text('next_node'), // ID of the next node (0-to-1 relationship)
   prevNode: text('prev_node'), // ID of the previous node (0-to-1 relationship)
   timestamp: integer('timestamp').notNull(),
-  createdAt: integer('created_at').notNull().default(Date.now()),
+  createdAt: integer('created_at').notNull().$defaultFn(() => Date.now()),
 });
 
 export const attributes = sqliteTable('attributes', {
@@ -17,7 +17,7 @@ export const attributes = sqliteTable('attributes', {
   key: text('key').notNull(), // Attribute key/name
   value: text('value').notNull(), // Attribute value
   description: text('description'), // Optional description (not shown in UI)
-  createdAt: integer('created_at').notNull().default(Date.now()),
+  createdAt: integer('created_at').notNull().$defaultFn(() => Date.now()),
 });
 
 export type Node = typeof nodes.$inferSelect;
