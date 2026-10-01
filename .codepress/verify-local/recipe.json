@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "setup_commands": [
+    ["npm", "ci"]
+  ],
+  "services": [],
+  "checks": [
+    {
+      "id": "typecheck",
+      "executor": "native",
+      "command": ["npm", "run", "typecheck"],
+      "working_dir": ".",
+      "timeout_seconds": 900,
+      "expected_exit_codes": [0],
+      "env_defaults": {},
+      "required_bindings": []
+    },
+    {
+      "id": "build",
+      "executor": "native",
+      "command": ["npm", "run", "build"],
+      "working_dir": ".",
+      "timeout_seconds": 900,
+      "expected_exit_codes": [0],
+      "env_defaults": {},
+      "required_bindings": []
+    }
+  ]
+}
